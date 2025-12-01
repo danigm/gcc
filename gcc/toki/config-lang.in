@@ -1,0 +1,15 @@
+# config-lang.in -- Top level configure fragment for gcc toki frontend.
+
+# This file is part of GCC.
+
+language="toki"
+
+compilers="toki1\$(exeext)"
+
+target_libs=""
+
+gtfiles="\$(srcdir)/toki/toki1.cc"
+# lang_requires_boot_languages=c++
+
+# Do not build by default.
+build_by_default="no"

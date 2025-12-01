@@ -1,0 +1,73 @@
+# Make-lang.in -- Top level -*- makefile -*- fragment for gcc toki frontend.
+
+GCCTOKI_INSTALL_NAME := $(shell echo gcctoki|sed '$(program_transform_name)')
+GCCTOKI_TARGET_INSTALL_NAME := $(target_noncanonical)-$(shell echo gcctoki|sed '$(program_transform_name)')
+
+# The name for selecting toki in LANGUAGES.
+toki: toki1$(exeext)
+
+.PHONY: toki
+
+# Driver
+
+GCCTOKI_OBJS = $(GCC_OBJS) toki/tokispec.o
+
+gcctoki$(exeext): $(GCCTOKI_OBJS) $(EXTRA_GCC_OBJS) libcommon-target.a $(LIBDEPS)
+	+$(LINKER) $(ALL_LINKERFLAGS) $(LDFLAGS) -o $@ \
+	  $(GCCTOKI_OBJS) $(EXTRA_GCC_OBJS) libcommon-target.a \
+	  $(EXTRA_GCC_LIBS) $(LIBS)
+
+# The compiler proper
+
+toki_OBJS = toki/tokispec.o
+
+toki1$(exeext): attribs.o $(TOKI_OBJS) $(BACKEND) $(LIBDEPS)
+	+$(LLINKER) $(ALL_LINKERFLAGS) $(LDFLAGS) -o $@ \
+	      attribs.o $(TOKI_OBJS) $(BACKEND) $(LIBS) $(BACKENDLIBS)
+
+toki.all.cross:
+
+toki.start.encap: gcctoki$(exeext)
+toki.rest.encap:
+
+toki.install-common: installdirs
+	-rm -f $(DESTDIR)$(bindir)/$(GCCTOKI_INSTALL_NAME)$(exeext)
+	$(INSTALL_PROGRAM) gcctoki$(exeext) $(DESTDIR)$(bindir)/$(GCCTOKI_INSTALL_NAME)$(exeext)
+	rm -f $(DESTDIR)$(bindir)/$(GCCTOKI_TARGET_INSTALL_NAME)$(exeext); \
+	( cd $(DESTDIR)$(bindir) && \
+      $(LN) $(GCCTOKI_INSTALL_NAME)$(exeext) $(GCCTOKI_TARGET_INSTALL_NAME)$(exeext) ); \
+
+# Required goals, they still do nothing
+toki.install-man:
+toki.install-info:
+toki.install-pdf:
+toki.install-plugin:
+toki.install-html:
+toki.info:
+toki.dvi:
+toki.pdf:
+toki.html:
+toki.man:
+toki.mostlyclean:
+toki.clean:
+toki.distclean:
+toki.maintainer-clean:
+
+# make uninstall
+toki.uninstall:
+	-rm -f gcctoki$(exeext) toki1$(exeext)
+	-rm -f $(toki_OBJS)
+
+# Used for handling bootstrap
+toki.stage1: stage1-start
+	-mv toki/*$(objext) stage1/toki
+toki.stage2: stage2-start
+	-mv toki/*$(objext) stage2/toki
+toki.stage3: stage3-start
+	-mv toki/*$(objext) stage3/toki
+toki.stage4: stage4-start
+	-mv toki/*$(objext) stage4/toki
+toki.stageprofile: stageprofile-start
+	-mv toki/*$(objext) stageprofile/toki
+toki.stagefeedback: stagefeedback-start
+	-mv toki/*$(objext) stagefeedback/toki
