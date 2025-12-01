@@ -19,16 +19,19 @@ gcctoki$(exeext): $(GCCTOKI_OBJS) $(EXTRA_GCC_OBJS) libcommon-target.a $(LIBDEPS
 
 # The compiler proper
 
-toki_OBJS = toki/tokispec.o
+toki_OBJS = toki/toki1.o
 
-toki1$(exeext): attribs.o $(TOKI_OBJS) $(BACKEND) $(LIBDEPS)
+toki1$(exeext): attribs.o $(toki_OBJS) $(BACKEND) $(LIBDEPS)
 	+$(LLINKER) $(ALL_LINKERFLAGS) $(LDFLAGS) -o $@ \
-	      attribs.o $(TOKI_OBJS) $(BACKEND) $(LIBS) $(BACKENDLIBS)
+	      attribs.o $(toki_OBJS) $(BACKEND) $(LIBS) $(BACKENDLIBS)
 
 toki.all.cross:
 
 toki.start.encap: gcctoki$(exeext)
 toki.rest.encap:
+
+# No toki-specific selftests
+selftest-toki:
 
 toki.install-common: installdirs
 	-rm -f $(DESTDIR)$(bindir)/$(GCCTOKI_INSTALL_NAME)$(exeext)
