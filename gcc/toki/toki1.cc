@@ -70,10 +70,37 @@ toki_langhook_init (void)
   return true;
 }
 
+/* BEGIN Custom parser */
+
+static void
+toki_parse_file (const char *filename)
+{
+  FILE *file = fopen (filename, "r");
+  if (file == NULL)
+    {
+      fatal_error (UNKNOWN_LOCATION, "cannot open filename %s: %m", filename);
+    }
+
+  // Here we will analyze our file
+
+  fclose (file);
+}
+
+static void
+toki_parse_files (int num_files, const char **files)
+{
+  for (int i = 0; i < num_files; i++)
+    {
+      toki_parse_file (files[i]);
+    }
+}
+
+/* ENDOF Custom parser */
+
 static void
 toki_langhook_parse_file (void)
 {
-  fprintf(stderr, "Hello gcctoki!\n");
+  toki_parse_files (num_in_fnames, in_fnames);
 }
 
 static tree
