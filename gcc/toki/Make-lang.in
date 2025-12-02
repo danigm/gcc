@@ -19,7 +19,11 @@ gcctoki$(exeext): $(GCCTOKI_OBJS) $(EXTRA_GCC_OBJS) libcommon-target.a $(LIBDEPS
 
 # The compiler proper
 
-toki_OBJS = toki/toki1.o
+toki_OBJS = \
+	toki/toki1.o \
+	toki/toki-token.o \
+	toki/toki-lexer.o \
+	$(END)
 
 toki1$(exeext): attribs.o $(toki_OBJS) $(BACKEND) $(LIBDEPS)
 	+$(LLINKER) $(ALL_LINKERFLAGS) $(LDFLAGS) -o $@ \
