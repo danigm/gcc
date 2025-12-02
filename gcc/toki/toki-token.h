@@ -31,6 +31,7 @@ namespace Toki
   TOKI_TOKEN (PLUS, "+")                                                       \
   TOKI_TOKEN (RIGHT_PAREN, ")")                                                \
   TOKI_TOKEN (SEMICOLON, ";")                                                  \
+  TOKI_TOKEN (EOL, "\n")                                                       \
   TOKI_TOKEN (SLASH, "/")                                                      \
   TOKI_TOKEN (PERCENT, "%")                                                    \
   TOKI_TOKEN (GREATER, ">")                                                    \
@@ -47,13 +48,17 @@ namespace Toki
   TOKI_TOKEN (RIGHT_BRACE, "}")                                                \
   TOKI_TOKEN (DOT, ".")                                                        \
                                                                                \
+  TOKI_TOKEN_KEYWORD (ALA, "ala")                                              \
   TOKI_TOKEN_KEYWORD (ANTE, "ante")                                            \
+  TOKI_TOKEN_KEYWORD (ANU, "anu")                                              \
   TOKI_TOKEN_KEYWORD (E, "e")                                                  \
+  TOKI_TOKEN_KEYWORD (EN, "en")                                                \
   TOKI_TOKEN_KEYWORD (IJO, "ijo")                                              \
   TOKI_TOKEN_KEYWORD (JO, "jo")                                                \
   TOKI_TOKEN_KEYWORD (KAMA, "kama")                                            \
   TOKI_TOKEN_KEYWORD (LA, "la")                                                \
   TOKI_TOKEN_KEYWORD (LI, "li")                                                \
+  TOKI_TOKEN_KEYWORD (LON, "lon")                                              \
   TOKI_TOKEN_KEYWORD (LUKIN, "lukin")                                          \
   TOKI_TOKEN_KEYWORD (NASIN, "nasin")                                          \
   TOKI_TOKEN_KEYWORD (NI, "ni")                                                \

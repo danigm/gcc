@@ -15,7 +15,7 @@
 #include "langhooks-def.h"
 #include "common/common-target.h"
 
-#include "toki/toki-lexer.h"
+#include "toki/toki-parser.h"
 
 /* Language-dependent contents of a type.  */
 
@@ -71,55 +71,6 @@ toki_langhook_init (void)
 
   return true;
 }
-
-/* BEGIN Custom parser */
-
-static void
-toki_parse_file (const char *filename)
-{
-  FILE *file = fopen (filename, "r");
-  if (file == NULL)
-    {
-      fatal_error (UNKNOWN_LOCATION, "cannot open filename %s: %m", filename);
-    }
-
-  // Here we will analyze our file
-  Toki::Lexer lex (filename, file);
-
-  Toki::const_TokenPtr tok = lex.peek_token ();
-  for (;;)
-    {
-      bool has_text = tok->get_id () == Toki::IDENTIFIER
-		      || tok->get_id () == Toki::INTEGER_LITERAL
-		      || tok->get_id () == Toki::REAL_LITERAL
-		      || tok->get_id () == Toki::STRING_LITERAL;
-
-      location_t loc = tok->get_locus ();
-
-      fprintf (stderr, "<id=%s%s, %s, line=%d, col=%d>\n", tok->token_id_to_str (),
-	       has_text ? (std::string(", text=") + tok->get_str ()).c_str () : "",
-	       LOCATION_FILE (loc), LOCATION_LINE (loc), LOCATION_COLUMN (loc));
-
-      if (tok->get_id() == Toki::END_OF_FILE)
-          break;
-
-      lex.skip_token ();
-      tok = lex.peek_token ();
-    }
-
-  fclose (file);
-}
-
-static void
-toki_parse_files (int num_files, const char **files)
-{
-  for (int i = 0; i < num_files; i++)
-    {
-      toki_parse_file (files[i]);
-    }
-}
-
-/* ENDOF Custom parser */
 
 static void
 toki_langhook_parse_file (void)

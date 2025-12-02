@@ -9,7 +9,7 @@ compilers="toki1\$(exeext)"
 target_libs=""
 
 gtfiles="\$(srcdir)/toki/toki1.cc"
-# lang_requires_boot_languages=c++
+lang_requires_boot_languages=c++
 
 # Do not build by default.
 build_by_default="no"

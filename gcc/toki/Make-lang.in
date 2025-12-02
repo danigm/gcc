@@ -23,6 +23,10 @@ toki_OBJS = \
 	toki/toki1.o \
 	toki/toki-token.o \
 	toki/toki-lexer.o \
+	toki/toki-parser.o \
+	toki/toki-scope.o \
+	toki/toki-symbol.o \
+	toki/toki-symbol-mapping.o \
 	$(END)
 
 toki1$(exeext): attribs.o $(toki_OBJS) $(BACKEND) $(LIBDEPS)
