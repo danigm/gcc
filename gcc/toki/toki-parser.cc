@@ -185,14 +185,52 @@ Parser::unexpected_token (const_TokenPtr t)
 void
 Parser::parse_program ()
 {
+  // Built type of main "int (int, char**)"
+  tree main_fndecl_type_param[] = {
+    integer_type_node,					     /* int */
+    build_pointer_type (build_pointer_type (char_type_node)) /* char** */
+  };
+  tree main_fndecl_type
+    = build_function_type_array (integer_type_node, 2, main_fndecl_type_param);
+  // Create function declaration "int main(int, char**)"
+  main_fndecl = build_fn_decl ("main", main_fndecl_type);
+
   // Enter top level scope
   enter_scope ();
   // program -> statement*
   parse_statement_seq (&Parser::done_end_of_file);
 
+  // Append "return 0;"
+  tree resdecl
+    = build_decl (UNKNOWN_LOCATION, RESULT_DECL, NULL_TREE, integer_type_node);
+  DECL_CONTEXT (resdecl) = main_fndecl;
+  DECL_RESULT (main_fndecl) = resdecl;
+  tree set_result
+    = build2 (INIT_EXPR, void_type_node, DECL_RESULT (main_fndecl),
+	      build_int_cst_type (integer_type_node, 0));
+  tree return_stmt = build1 (RETURN_EXPR, void_type_node, set_result);
+
+  get_current_stmt_list ().append (return_stmt);
+
   // Leave top level scope, get its binding expression and its main block
   TreeSymbolMapping main_tree_scope = leave_scope ();
   Tree main_block = main_tree_scope.block;
+
+  // Finish main function
+  BLOCK_SUPERCONTEXT (main_block.get_tree ()) = main_fndecl;
+  DECL_INITIAL (main_fndecl) = main_block.get_tree ();
+  DECL_SAVED_TREE (main_fndecl) = main_tree_scope.bind_expr.get_tree ();
+
+  DECL_EXTERNAL (main_fndecl) = 0;
+  DECL_PRESERVE_P (main_fndecl) = 1;
+
+  // Convert from GENERIC to GIMPLE
+  gimplify_function_tree (main_fndecl);
+
+  // Insert it into the graph
+  cgraph_node::finalize_function (main_fndecl, true);
+
+  main_fndecl = NULL_TREE;
 }
 
 bool
@@ -345,7 +383,6 @@ Parser::parse_function_declaration ()
   // parameters: li kama jo (e TYPE)+
   // return: li pana e (TYPE)+
 
-  printf ("PARSE FUNCTION\n");
   if (!skip_token (Toki::NASIN))
     {
       skip_after_eol ();
@@ -374,7 +411,6 @@ Parser::parse_function_declaration ()
 Tree
 Parser::parse_command_statement ()
 {
-  printf ("PARSE COMMAND\n");
   // function call:
   // o IDENT
   if (!skip_token (Toki::O))
@@ -394,7 +430,6 @@ Parser::parse_command_statement ()
 Tree
 Parser::parse_o_toki_statement ()
 {
-  printf ("PARSE TOKI\n");
   // print function call:
   // toki e EXPR
   if (!skip_token (Toki::TOKI))
@@ -469,13 +504,14 @@ Parser::parse_o_toki_statement ()
 Tree
 Parser::parse_block_statement ()
 {
-  printf ("PARSE BLOCK\n");
   TreeSymbolMapping block_tree_scope;
   if (!skip_token (Toki::LEFT_BRACE))
     {
       skip_after_eol ();
       return Tree::error ();
     }
+
+  enter_scope ();
 
   parse_statement_seq (&Parser::done_right_brace);
 
@@ -493,7 +529,7 @@ Parser::parse_block_statement ()
       return Tree::error ();
     }
 
-  return block_tree_scope.bind_expr.get_tree ();
+  return block_tree_scope.bind_expr;
 }
 
 // This is a Pratt parser
@@ -1250,55 +1286,8 @@ Parser::parse_integer_expression ()
 Tree
 Parser::parse_main ()
 {
-  printf ("PARSE MAIN\n");
-
-  // Built type of main "int (int, char**)"
-  tree main_fndecl_type_param[] = {
-    integer_type_node,					     /* int */
-    build_pointer_type (build_pointer_type (char_type_node)) /* char** */
-  };
-  tree main_fndecl_type
-    = build_function_type_array (integer_type_node, 2, main_fndecl_type_param);
-  // Create function declaration "int main(int, char**)"
-  main_fndecl = build_fn_decl ("main", main_fndecl_type);
-
-  // Enter top level scope
-  enter_scope ();
-
   Tree main = parse_block_statement ();
-
-  // Append "return 0;"
-  tree resdecl
-    = build_decl (UNKNOWN_LOCATION, RESULT_DECL, NULL_TREE, integer_type_node);
-  DECL_CONTEXT (resdecl) = main_fndecl;
-  DECL_RESULT (main_fndecl) = resdecl;
-  tree set_result
-    = build2 (INIT_EXPR, void_type_node, DECL_RESULT (main_fndecl),
-	      build_int_cst_type (integer_type_node, 0));
-  tree return_stmt = build1 (RETURN_EXPR, void_type_node, set_result);
-
-  get_current_stmt_list ().append (return_stmt);
-
-  // Leave top level scope, get its binding expression and its main block
-  TreeSymbolMapping main_tree_scope = leave_scope ();
-  Tree main_block = main_tree_scope.block;
-
-  // Finish main function
-  BLOCK_SUPERCONTEXT (main_block.get_tree ()) = main_fndecl;
-  DECL_INITIAL (main_fndecl) = main_block.get_tree ();
-  DECL_SAVED_TREE (main_fndecl) = main_tree_scope.bind_expr.get_tree ();
-
-  DECL_EXTERNAL (main_fndecl) = 0;
-  DECL_PRESERVE_P (main_fndecl) = 1;
-
-  // Convert from GENERIC to GIMPLE
-  gimplify_function_tree (main_fndecl);
-
-  // Insert it into the graph
-  cgraph_node::finalize_function (main_fndecl, true);
-
-  main_fndecl = NULL_TREE;
-  return main_tree_scope.bind_expr;
+  return main;
 }
 
 }
