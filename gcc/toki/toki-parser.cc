@@ -66,6 +66,7 @@ private:
 
   TreeSymbolMapping leave_scope ();
 
+  SymbolPtr query_type (const std::string &name, location_t loc);
   SymbolPtr query_variable (const std::string &name, location_t loc);
   SymbolPtr query_integer_variable (const std::string &name, location_t loc);
 
@@ -110,15 +111,18 @@ public:
 
   void parse_program ();
 
+  Tree parse_type ();
   Tree parse_statement ();
 
   Tree parse_main ();
   Tree parse_function_declaration ();
   Tree parse_command_statement ();
+  Tree parse_variable_statement ();
   Tree parse_o_toki_statement ();
   Tree parse_block_statement ();
 
   Tree parse_expression ();
+  Tree parse_expression_naming_variable ();
   Tree parse_boolean_expression ();
   Tree parse_integer_expression ();
 
@@ -338,6 +342,9 @@ Parser::parse_statement ()
     case Toki::O:
       return parse_command_statement ();
       break;
+    case Toki::NIMI:
+      return parse_variable_statement ();
+      break;
     default:
       unexpected_token (t);
       return Tree::error ();
@@ -403,9 +410,9 @@ Parser::parse_function_declaration ()
   const_TokenPtr identifier = expect_token (Toki::IDENTIFIER);
 
   // TODO: support parameters and return definition
-  expect_token (Toki::LEFT_BRACE);
-
-  expect_token (Toki::RIGHT_BRACE);
+  // TODO: store function somewhere to be called
+  Tree block = parse_block_statement ();
+  return NULL_TREE;
 }
 
 Tree
@@ -530,6 +537,77 @@ Parser::parse_block_statement ()
     }
 
   return block_tree_scope.bind_expr;
+}
+
+Tree
+Parser::parse_variable_statement ()
+{
+  // variable definition:
+  // nimi IDENT li expr
+  if (!skip_token (Toki::NIMI))
+    {
+      skip_after_eol ();
+      return Tree::error ();
+    }
+
+  const_TokenPtr identifier = expect_token (Toki::IDENTIFIER);
+  if (identifier == NULL)
+    {
+      skip_after_eol ();
+      return Tree::error ();
+    }
+
+  const_TokenPtr assig_tok = expect_token (Toki::LI);
+
+  const_TokenPtr first_of_expr = lexer.peek_token ();
+  Tree expr = parse_expression ();
+  if (expr.is_error ())
+    return Tree::error ();
+
+  SymbolPtr sym = scope.get_current_mapping ().get (identifier->get_str ());
+  // Add to scope if it's not there
+  if (!sym)
+    {
+      SymbolPtr sym (new Symbol (Toki::VARIABLE, identifier->get_str ()));
+      scope.get_current_mapping ().insert (sym);
+
+      // Add variable declaration
+      // TODO
+      Tree type_tree = expr.get_type ();
+      Tree decl = build_decl (identifier->get_locus (), VAR_DECL,
+			      get_identifier (sym->get_name ().c_str ()),
+			      type_tree.get_tree ());
+      DECL_CONTEXT (decl.get_tree()) = main_fndecl;
+      gcc_assert (!stack_var_decl_chain.empty ());
+      stack_var_decl_chain.back ().append (decl);
+
+      sym->set_tree_decl (decl);
+
+      Tree stmt
+	= build_tree (DECL_EXPR, identifier->get_locus (), void_type_node, decl);
+
+      get_current_stmt_list ().append (stmt);
+    }
+
+  // assignment
+  SymbolPtr s = scope.get_current_mapping ().get (identifier->get_str ());
+  Tree variable = Tree (s->get_tree_decl (), identifier->get_locus ());
+  if (variable.is_error ())
+    return Tree::error ();
+
+  if (variable.get_type () != expr.get_type ())
+    {
+      error_at (first_of_expr->get_locus (),
+		"cannot assign value of type %s to a variable of type %s",
+		print_type (expr.get_type ()),
+		print_type (variable.get_type ()));
+      return Tree::error ();
+    }
+
+  Tree assig_expr = build_tree (MODIFY_EXPR, assig_tok->get_locus (),
+				void_type_node, variable, expr);
+
+  return assig_expr;
 }
 
 // This is a Pratt parser
@@ -1160,6 +1238,23 @@ Parser::print_type (Tree type)
 }
 
 SymbolPtr
+Parser::query_type (const std::string &name, location_t loc)
+{
+  SymbolPtr sym = scope.lookup (name);
+  if (sym == NULL)
+    {
+      error_at (loc, "type '%s' not declared in the current scope",
+		name.c_str ());
+    }
+  else if (sym->get_kind () != Toki::TYPENAME)
+    {
+      error_at (loc, "name '%s' is not a type", name.c_str ());
+      sym = SymbolPtr();
+    }
+  return sym;
+}
+
+SymbolPtr
 Parser::query_variable (const std::string &name, location_t loc)
 {
   SymbolPtr sym = scope.lookup (name);
@@ -1281,6 +1376,122 @@ Parser::parse_integer_expression ()
       return Tree::error ();
     }
   return expr;
+}
+
+Tree
+Parser::parse_expression_naming_variable ()
+{
+  Tree expr = parse_expression ();
+  if (expr.is_error ())
+    return expr;
+
+  if (expr.get_tree_code () != VAR_DECL && expr.get_tree_code () != ARRAY_REF
+      && expr.get_tree_code () != COMPONENT_REF)
+    {
+      error_at (expr.get_locus (),
+		"does not designate a variable, array element or field");
+      return Tree::error ();
+    }
+  return expr;
+}
+
+Tree
+Parser::parse_type ()
+{
+  // type -> "int"
+  //      | "float"
+  //      | "bool"
+  //      | IDENTIFIER
+  //      | type '[' expr ']'
+  //      | type '(' expr : expr ')'
+
+  const_TokenPtr t = lexer.peek_token ();
+
+  Tree type;
+
+  switch (t->get_id ())
+    {
+    case Toki::IDENTIFIER:
+      {
+	SymbolPtr s = query_type (t->get_str (), t->get_locus ());
+	lexer.skip_token ();
+	if (s == NULL)
+	  type = Tree::error ();
+	else
+	  type = TREE_TYPE (s->get_tree_decl ().get_tree ());
+      }
+      break;
+    default:
+      unexpected_token (t);
+      return Tree::error ();
+      break;
+    }
+
+  typedef std::vector<std::pair<Tree, Tree> > Dimensions;
+  Dimensions dimensions;
+
+  t = lexer.peek_token ();
+  while (t->get_id () == Toki::LEFT_PAREN || t->get_id () == Toki::LEFT_SQUARE)
+    {
+      lexer.skip_token ();
+
+      Tree lower_bound, upper_bound;
+      if (t->get_id () == Toki::LEFT_SQUARE)
+	{
+	  Tree size = parse_integer_expression ();
+	  skip_token (Toki::RIGHT_SQUARE);
+
+	  lower_bound = Tree (build_int_cst_type (integer_type_node, 0),
+			      size.get_locus ());
+	  upper_bound
+	    = build_tree (MINUS_EXPR, size.get_locus (), integer_type_node,
+			  size, build_int_cst (integer_type_node, 1));
+
+	}
+      else if (t->get_id () == Toki::LEFT_PAREN)
+	{
+	  lower_bound = parse_integer_expression ();
+	  skip_token (Toki::COLON);
+
+	  upper_bound = parse_integer_expression ();
+	  skip_token (Toki::RIGHT_PAREN);
+	}
+      else
+	{
+	  gcc_unreachable ();
+	}
+
+      dimensions.push_back (std::make_pair (lower_bound, upper_bound));
+      t = lexer.peek_token ();
+    }
+
+  for (Dimensions::reverse_iterator it = dimensions.rbegin ();
+       it != dimensions.rend (); it++)
+    {
+      it->first = Tree (fold (it->first.get_tree ()), it->first.get_locus ());
+//       if (it->first.get_tree_code () != INTEGER_CST)
+// 	{
+// 	  error_at (it->first.get_locus (), "is not an integer constant");
+// 	  break;
+// 	}
+      it->second
+	= Tree (fold (it->second.get_tree ()), it->second.get_locus ());
+//       if (it->second.get_tree_code () != INTEGER_CST)
+// 	{
+// 	  error_at (it->second.get_locus (), "is not an integer constant");
+// 	  break;
+// 	}
+
+      if (!type.is_error ())
+	{
+	  Tree range_type
+	    = build_range_type (integer_type_node, it->first.get_tree (),
+				it->second.get_tree ());
+	  type = build_array_type (type.get_tree (), range_type.get_tree ());
+	}
+    }
+
+  return type;
 }
 
 Tree
