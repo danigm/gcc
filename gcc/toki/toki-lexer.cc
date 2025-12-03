@@ -119,7 +119,7 @@ Lexer::build_token ()
 	  current_line++;
 	  current_column = 1;
 	  linemap_line_start (::line_table, current_line, max_column_hint);
-	  continue;
+	  return Token::make (EOL, loc);
 	case ' ':
 	  current_column++;
 	  continue;

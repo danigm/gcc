@@ -66,6 +66,7 @@ namespace Toki
   TOKI_TOKEN_KEYWORD (O, "o")                                                  \
   TOKI_TOKEN_KEYWORD (OPEN, "open")                                            \
   TOKI_TOKEN_KEYWORD (PANA, "pana")                                            \
+  TOKI_TOKEN_KEYWORD (PINI, "pini")                                            \
   TOKI_TOKEN_KEYWORD (SIN, "sin")                                              \
   TOKI_TOKEN_KEYWORD (TOKI, "toki")                                            \
                                                                                \

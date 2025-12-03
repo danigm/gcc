@@ -36,7 +36,9 @@ private:
   void skip_after_eol ();
 
   bool skip_token (TokenId);
+  void skip_eol ();
   const_TokenPtr expect_token (TokenId);
+  const_TokenPtr expect_token_skip_eol (Toki::TokenId token_id);
   void unexpected_token (const_TokenPtr);
 
   // Expression parsing
@@ -119,6 +121,7 @@ public:
   Tree parse_command_statement ();
   Tree parse_variable_statement ();
   Tree parse_o_toki_statement ();
+  Tree parse_o_toki_parameter ();
   Tree parse_block_statement ();
 
   Tree parse_expression ();
@@ -158,6 +161,19 @@ Parser::skip_after_eol ()
 }
 
 const_TokenPtr
+Parser::expect_token_skip_eol (Toki::TokenId token_id)
+{
+  const_TokenPtr t = lexer.peek_token ();
+  while (t->get_id () != Toki::END_OF_FILE && t->get_id () == Toki::EOL)
+    {
+      lexer.skip_token ();
+      t = lexer.peek_token ();
+    }
+
+  return expect_token (token_id);
+}
+
+const_TokenPtr
 Parser::expect_token (Toki::TokenId token_id)
 {
   const_TokenPtr t = lexer.peek_token ();
@@ -178,6 +194,17 @@ bool
 Parser::skip_token (Toki::TokenId token_id)
 {
   return expect_token (token_id) != const_TokenPtr();
+}
+
+void
+Parser::skip_eol ()
+{
+  const_TokenPtr t = lexer.peek_token ();
+  while (t->get_id () != Toki::END_OF_FILE && t->get_id () == Toki::EOL)
+    {
+      lexer.skip_token ();
+      t = lexer.peek_token ();
+    }
 }
 
 void
@@ -336,6 +363,10 @@ Parser::parse_statement ()
 
   switch (t->get_id ())
     {
+    case Toki::EOL:
+      lexer.skip_token ();
+      return NULL_TREE;
+      break;
     case Toki::NASIN:
       return parse_function_declaration ();
       break;
@@ -438,15 +469,28 @@ Tree
 Parser::parse_o_toki_statement ()
 {
   // print function call:
-  // toki e EXPR
+  // toki e EXPR e EXPR ...
   if (!skip_token (Toki::TOKI))
     {
       skip_after_eol ();
       return Tree::error ();
     }
 
-  expect_token (Toki::E);
+  const_TokenPtr next_tk = lexer.peek_token ();
+  while (next_tk->get_id () != Toki::EOL)
+    {
+      expect_token (Toki::E);
+      Tree stmt = parse_o_toki_parameter ();
+      get_current_stmt_list ().append (stmt);
+      next_tk = lexer.peek_token ();
+    }
 
+  return NULL_TREE;
+}
+
+Tree
+Parser::parse_o_toki_parameter ()
+{
   const_TokenPtr first_of_expr = lexer.peek_token ();
   Tree expr = parse_expression ();
 
@@ -455,8 +499,8 @@ Parser::parse_o_toki_statement ()
 
   if (expr.get_type () == integer_type_node)
     {
-      // printf("%d\n", expr)
-      const char *format_integer = "%d\n";
+      // printf("%d", expr)
+      const char *format_integer = "%d";
       tree args[]
 	= {build_string_literal (strlen (format_integer) + 1, format_integer),
 	   expr.get_tree ()};
@@ -471,8 +515,8 @@ Parser::parse_o_toki_statement ()
     }
   else if (expr.get_type () == float_type_node)
     {
-      // printf("%f\n", (double)expr)
-      const char *format_float = "%f\n";
+      // printf("%f", (double)expr)
+      const char *format_float = "%f";
       tree args[]
 	= {build_string_literal (strlen (format_float) + 1, format_float),
 	   convert (double_type_node, expr.get_tree ())};
@@ -487,14 +531,18 @@ Parser::parse_o_toki_statement ()
     }
   else if (is_string_type (expr.get_type ()))
     {
-      // Alternatively we could use printf('%s\n', expr) instead of puts(expr)
-      tree args[] = {expr.get_tree ()};
+      // printf("%s", expr)
+      const char *format_str = "%s";
+      tree args[]
+	= {build_string_literal (strlen (format_str) + 1, format_str),
+	   expr.get_tree ()};
 
-      Tree puts_fn = get_puts_addr ();
+      Tree printf_fn = get_printf_addr ();
 
       tree stmt
 	= build_call_array_loc (first_of_expr->get_locus (), integer_type_node,
-				puts_fn.get_tree (), 1, args);
+				printf_fn.get_tree (), 2, args);
+
       return stmt;
     }
   else
@@ -512,7 +560,7 @@ Tree
 Parser::parse_block_statement ()
 {
   TreeSymbolMapping block_tree_scope;
-  if (!skip_token (Toki::LEFT_BRACE))
+  if (!expect_token (Toki::LEFT_BRACE))
     {
       skip_after_eol ();
       return Tree::error ();
@@ -528,7 +576,7 @@ Parser::parse_block_statement ()
   if (tok->get_id () == Toki::RIGHT_BRACE)
     {
       // Consume '}'
-      skip_token (Toki::RIGHT_BRACE);
+      expect_token (Toki::RIGHT_BRACE);
     }
   else
     {
@@ -756,6 +804,14 @@ Parser::null_denotation (const_TokenPtr tok)
       {
 	std::string str = tok->get_str ();
 	const char *c_str = str.c_str ();
+	return Tree (build_string_literal (::strlen (c_str) + 1, c_str),
+		     tok->get_locus ());
+      }
+      break;
+    case Toki::PINI:
+      {
+	// new line
+	const char *c_str = "\n";
 	return Tree (build_string_literal (::strlen (c_str) + 1, c_str),
 		     tok->get_locus ());
       }
