@@ -56,6 +56,9 @@ private:
 
   Tree build_label_decl (const char *name, location_t loc);
   Tree build_if_statement (Tree bool_expr, Tree then_part, Tree else_part);
+  Tree build_loop_statement ();
+
+  std::string get_loop_tag (const char *suffix);
 
   const char *print_type (Tree type);
 
@@ -127,6 +130,8 @@ public:
   Tree parse_o_toki_parameter ();
   Tree parse_block_statement ();
   Tree parse_if_statement ();
+  Tree parse_loop_statement ();
+  Tree parse_break_statement ();
 
   Tree parse_expression ();
   Tree parse_expression_naming_variable ();
@@ -147,6 +152,8 @@ private:
   std::vector<TreeChain> stack_var_decl_chain;
 
   std::vector<BlockChain> stack_block_chain;
+
+  std::vector<Tree> stack_loop_labels;
 };
 
 void
@@ -385,7 +392,7 @@ Parser::parse_statement ()
     case Toki::NIMI:
       return parse_variable_statement ();
       break;
-    // If statement?
+    // If statement
     case Toki::LEFT_PAREN:
       return parse_if_statement ();
       break;
@@ -455,15 +462,17 @@ Parser::parse_function_declaration ()
 
   // TODO: support parameters and return definition
   // TODO: store function somewhere to be called
-  Tree block = parse_block_statement ();
+  parse_block_statement ();
   return NULL_TREE;
 }
 
 Tree
 Parser::parse_command_statement ()
 {
-  // function call:
+  // function call, or loop, or break:
   // o IDENT
+  // o sin e ni {} -> loop
+  // o pini -> break loop
   if (!skip_token (Toki::O))
     {
       skip_after_eol ();
@@ -474,8 +483,103 @@ Parser::parse_command_statement ()
   if (t->get_id () == Toki::TOKI)
     return parse_o_toki_statement ();
 
+  if (t->get_id () == Toki::SIN)
+    return parse_loop_statement ();
+
+  if (t->get_id () == Toki::PINI)
+    return parse_break_statement ();
+
   // TODO: parse identifer, normal function call
-  gcc_unreachable ();
+  skip_after_eol ();
+  return Tree::error ();
+}
+
+Tree
+Parser::parse_break_statement ()
+{
+  // o pini
+  const_TokenPtr t = lexer.peek_token ();
+  if (!skip_token (Toki::PINI))
+    {
+      skip_after_eol ();
+      return Tree::error ();
+    }
+  // TODO: support tagging loops ?
+
+  // Jump to end of current loop (deeper)
+  if (stack_loop_labels.size () == 0)
+    {
+      skip_after_eol ();
+      return Tree::error ();
+    }
+
+  Tree end_of_loop_label_decl = stack_loop_labels.back ();
+  stack_loop_labels.pop_back ();
+  Tree goto_end = build_tree (GOTO_EXPR, t->get_locus (), void_type_node,
+			      end_of_loop_label_decl);
+
+  return goto_end;
+}
+
+Tree
+Parser::parse_loop_statement ()
+{
+  // o sin e ni {}
+  const_TokenPtr t = lexer.peek_token ();
+  if (!skip_token (Toki::SIN) || !skip_token (Toki::E) || !skip_token (Toki::NI))
+    {
+      skip_after_eol ();
+      return Tree::error ();
+    }
+
+  return build_loop_statement ();
+}
+
+/**
+ * Create a label for the loop and store in a queue
+ * pini will pop the last label and goto there
+ */
+Tree
+Parser::build_loop_statement ()
+{
+  const_TokenPtr t = lexer.peek_token ();
+
+  enter_scope ();
+  TreeStmtList stmt_list = get_current_stmt_list ();
+
+  Tree loop_body_label_decl
+    = build_label_decl (get_loop_tag ("body").c_str (), t->get_locus ());
+  Tree end_of_loop_label_decl
+    // FIXME - location
+    = build_label_decl (get_loop_tag ("end").c_str (), UNKNOWN_LOCATION);
+  stack_loop_labels.push_back (end_of_loop_label_decl);
+
+  Tree loop_body_label_expr
+    = build_tree (LABEL_EXPR, t->get_locus (), void_type_node,
+		  loop_body_label_decl);
+
+  // Add loop_body_0: body
+  stmt_list.append (loop_body_label_expr);
+
+  Tree block_body = parse_block_statement ();
+  stmt_list.append (block_body);
+
+  // FIXME - location
+  Tree goto_loop = build_tree (GOTO_EXPR, UNKNOWN_LOCATION, void_type_node,
+			       loop_body_label_decl);
+  // Add the loop, goto label
+  stmt_list.append (goto_loop);
+
+  // FIXME - location
+  Tree end_of_loop_label_expr
+    = build_tree (LABEL_EXPR, UNKNOWN_LOCATION, void_type_node,
+		  end_of_loop_label_decl);
+  // Add the loop end label, loop_end_0:
+  stmt_list.append (end_of_loop_label_expr);
+
+  TreeSymbolMapping loop_scope = leave_scope ();
+
+  return loop_scope.bind_expr;
 }
 
 Tree
@@ -561,7 +665,7 @@ Parser::parse_o_toki_parameter ()
   else
     {
       error_at (first_of_expr->get_locus (),
-		"value of type %s is not a valid write operand",
+		"value of type %qs is not a valid write operand",
 		print_type (expr.get_type ()));
       return Tree::error ();
     }
@@ -626,7 +730,7 @@ Parser::parse_variable_statement ()
   if (expr.is_error ())
     return Tree::error ();
 
-  SymbolPtr sym = scope.get_current_mapping ().get (identifier->get_str ());
+  SymbolPtr sym = scope.lookup (identifier->get_str ());
   // Add to scope if it's not there
   if (!sym)
     {
@@ -652,7 +756,7 @@ Parser::parse_variable_statement ()
     }
 
   // assignment
-  SymbolPtr s = scope.get_current_mapping ().get (identifier->get_str ());
+  SymbolPtr s = scope.lookup (identifier->get_str ());
   Tree variable = Tree (s->get_tree_decl (), identifier->get_locus ());
   if (variable.is_error ())
     return Tree::error ();
@@ -660,7 +764,7 @@ Parser::parse_variable_statement ()
   if (variable.get_type () != expr.get_type ())
     {
       error_at (first_of_expr->get_locus (),
-		"cannot assign value of type %s to a variable of type %s",
+		"cannot assign value of type %qs to a variable of type %qs",
 		print_type (expr.get_type ()),
 		print_type (variable.get_type ()));
       return Tree::error ();
@@ -722,6 +826,16 @@ Parser::build_label_decl (const char *name, location_t loc)
   DECL_CONTEXT (t) = main_fndecl;
 
   return t;
+}
+
+std::string
+Parser::get_loop_tag (const char *suffix)
+{
+  char n[21]; // enough to hold all numbers up to 64-bits
+  std::string name = "";
+  snprintf (n, 21, "%d", (int) stack_loop_labels.size ());
+  name = name + "loop_" + suffix + "_" + n;
+  return name;
 }
 
 Tree
@@ -961,7 +1075,7 @@ Parser::null_denotation (const_TokenPtr tok)
 	Tree expr = parse_expression ();
 	tok = lexer.peek_token ();
 	if (tok->get_id () != Toki::RIGHT_PAREN)
-	  error_at (tok->get_locus (), "expecting ) but %s found",
+	  error_at (tok->get_locus (), "expecting %qs but %qs found", ")",
 		    tok->get_token_description ());
 	else
 	  lexer.skip_token ();
@@ -976,7 +1090,7 @@ Parser::null_denotation (const_TokenPtr tok)
 	    || expr.get_type () != float_type_node)
 	  {
 	    error_at (tok->get_locus (),
-		      "operand of unary plus must be int or float but it is %s",
+		      "operand of unary plus must be %<int%> or %<float%> but it is %qs",
 		      print_type (expr.get_type ()));
 	    return Tree::error ();
 	  }
@@ -993,7 +1107,7 @@ Parser::null_denotation (const_TokenPtr tok)
 	  {
 	    error_at (
 	      tok->get_locus (),
-	      "operand of unary minus must be int or float but it is %s",
+	      "operand of unary minus must be %<int%> or %<float%> but it is %qs",
 	      print_type (expr.get_type ()));
 	    return Tree::error ();
 	  }
@@ -1011,7 +1125,7 @@ Parser::null_denotation (const_TokenPtr tok)
 	if (expr.get_type () != boolean_type_node)
 	  {
 	    error_at (tok->get_locus (),
-		      "operand of logical not must be a boolean but it is %s",
+		      "operand of logical not must be a %<boolean%> but it is %qs",
 		      print_type (expr.get_type ()));
 	    return Tree::error ();
 	  }
@@ -1271,7 +1385,7 @@ Parser::check_logical_operands (const_TokenPtr tok, Tree left, Tree right)
     {
       error_at (
 	tok->get_locus (),
-	"operands of operator %s must be boolean but they are %s and %s\n",
+	"operands of operator %qs must be boolean but they are %qs and %qs",
 	tok->get_token_description (), print_type (left.get_type ()),
 	print_type (right.get_type ()));
       return false;
