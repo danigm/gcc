@@ -132,6 +132,7 @@ public:
   Tree parse_if_statement ();
   Tree parse_loop_statement ();
   Tree parse_break_statement ();
+  Tree parse_function_call ();
 
   Tree parse_expression ();
   Tree parse_expression_naming_variable ();
@@ -461,9 +462,50 @@ Parser::parse_function_declaration ()
   const_TokenPtr identifier = expect_token (Toki::IDENTIFIER);
 
   // TODO: support parameters and return definition
-  // TODO: store function somewhere to be called
-  parse_block_statement ();
-  return NULL_TREE;
+
+  tree fndecl_type_param[] = {};
+  tree fndecl_type = build_function_type_array (integer_type_node, 0, nullptr);
+  tree fn_decl = build_fn_decl (identifier->get_str ().c_str (), fndecl_type);
+
+  enter_scope ();
+
+  Tree fn_body = parse_block_statement ();
+
+  // Append "return 0;"
+  tree resdecl
+    = build_decl (UNKNOWN_LOCATION, RESULT_DECL, NULL_TREE, integer_type_node);
+  DECL_CONTEXT (resdecl) = fn_decl;
+  DECL_RESULT (fn_decl) = resdecl;
+  tree set_result
+    = build2 (INIT_EXPR, void_type_node, DECL_RESULT (fn_decl),
+	      build_int_cst_type (integer_type_node, 0));
+  tree return_stmt = build1 (RETURN_EXPR, void_type_node, set_result);
+
+  get_current_stmt_list ().append (fn_body);
+  get_current_stmt_list ().append (return_stmt);
+  //
+
+  TreeSymbolMapping fn_tree_scope = leave_scope ();
+  Tree fn_block = fn_tree_scope.block;
+
+  BLOCK_SUPERCONTEXT (fn_block.get_tree ()) = fn_decl;
+  DECL_INITIAL (fn_decl) = fn_block.get_tree ();
+  DECL_SAVED_TREE (fn_decl) = fn_tree_scope.bind_expr.get_tree ();
+
+  DECL_EXTERNAL (fn_decl) = 0;
+  DECL_PRESERVE_P (fn_decl) = 1;
+
+  // Convert from GENERIC to GIMPLE
+  gimplify_function_tree (fn_decl);
+
+  // Add to the scope
+  Tree fn = build1 (ADDR_EXPR, build_pointer_type (fndecl_type), fn_decl);
+  scope.get_current_fn ().insert (std::make_pair (identifier->get_str (), fn));
+
+  // Insert it into the graph
+  cgraph_node::finalize_function (fn_decl, true);
+
+  return fn_decl;
 }
 
 Tree
@@ -489,9 +531,49 @@ Parser::parse_command_statement ()
   if (t->get_id () == Toki::PINI)
     return parse_break_statement ();
 
-  // TODO: parse identifer, normal function call
+  if (t->get_id () == Toki::IDENTIFIER)
+    return parse_function_call ();
+
   skip_after_eol ();
   return Tree::error ();
+}
+
+/**
+ * Expand a function in place
+ */
+Tree
+Parser::parse_function_call ()
+{
+  // o IDENT
+  const_TokenPtr identifier = expect_token (Toki::IDENTIFIER);
+  // TODO: support parameters
+
+  Tree fn = scope.lookup_fn (identifier->get_str ());
+  if (fn.is_null ())
+  {
+    skip_after_eol ();
+    return Tree::error ();
+  }
+
+  tree stmt
+    = build_call_array_loc (identifier->get_locus (), integer_type_node,
+			    fn.get_tree (), 0, nullptr);
+
+  return stmt;
+
+  /*
+      const char *format_integer = "TEST\n";
+      tree args[]
+	= {build_string_literal (strlen (format_integer) + 1, format_integer)};
+
+      Tree printf_fn = get_printf_addr ();
+
+      tree stmt
+	= build_call_array_loc (identifier->get_locus (), integer_type_node,
+				printf_fn.get_tree (), 1, args);
+
+      return stmt;
+    */
 }
 
 Tree
