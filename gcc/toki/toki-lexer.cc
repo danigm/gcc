@@ -132,19 +132,8 @@ Lexer::build_token ()
 	// * Punctuation *
 	// ***************
 	case ':':
-	  if (peek_input () == '=')
-	    {
-	      skip_input ();
-	      current_column += 2;
-
-	      return Token::make (ASSIG, loc);
-	    }
-	  else
-	    {
-	      current_column++;
-	      return Token::make (COLON, loc);
-	    }
-	  break;
+	  current_column++;
+	  return Token::make (COLON, loc);
 	case '*':
 	  current_column++;
 	  return Token::make (ASTERISK, loc);

@@ -20,7 +20,6 @@ namespace Toki
 #define TOKI_TOKEN_LIST                                                        \
   TOKI_TOKEN (FIRST_TOKEN, "<first-token-marker>")                             \
   TOKI_TOKEN (END_OF_FILE, "end of file")                                      \
-  TOKI_TOKEN (ASSIG, ":=")                                                     \
   TOKI_TOKEN (ASTERISK, "*")                                                   \
   TOKI_TOKEN (COLON, ":")                                                      \
   TOKI_TOKEN (COMMA, ",")                                                      \

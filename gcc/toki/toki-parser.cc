@@ -54,6 +54,9 @@ private:
   Tree get_printf_addr ();
   Tree get_puts_addr ();
 
+  Tree build_label_decl (const char *name, location_t loc);
+  Tree build_if_statement (Tree bool_expr, Tree then_part, Tree else_part);
+
   const char *print_type (Tree type);
 
   TreeStmtList &get_current_stmt_list ();
@@ -123,6 +126,7 @@ public:
   Tree parse_o_toki_statement ();
   Tree parse_o_toki_parameter ();
   Tree parse_block_statement ();
+  Tree parse_if_statement ();
 
   Tree parse_expression ();
   Tree parse_expression_naming_variable ();
@@ -367,14 +371,23 @@ Parser::parse_statement ()
       lexer.skip_token ();
       return NULL_TREE;
       break;
+    // function definition, main is called "open"
     case Toki::NASIN:
       return parse_function_declaration ();
       break;
+    // Command, function call, and some built-in calls
+    // - o toki e
+    // - o sin e ni
     case Toki::O:
       return parse_command_statement ();
       break;
+    // variables
     case Toki::NIMI:
       return parse_variable_statement ();
+      break;
+    // If statement?
+    case Toki::LEFT_PAREN:
+      return parse_if_statement ();
       break;
     default:
       unexpected_token (t);
@@ -580,6 +593,7 @@ Parser::parse_block_statement ()
     }
   else
     {
+      skip_after_eol ();
       unexpected_token (tok);
       return Tree::error ();
     }
@@ -656,6 +670,117 @@ Parser::parse_variable_statement ()
 				void_type_node, variable, expr);
 
   return assig_expr;
+}
+
+Tree
+Parser::parse_if_statement ()
+{
+  Tree expr;
+  Tree then_stmt;
+  Tree else_stmt;
+
+  // variable definition:
+  // (expr) la { } ante {}
+  if (!skip_token (Toki::LEFT_PAREN))
+    {
+      skip_after_eol ();
+      return Tree::error ();
+    }
+
+  expr = parse_expression ();
+  if (expr.is_error ())
+    return Tree::error ();
+
+  if (!skip_token (Toki::RIGHT_PAREN))
+    {
+      skip_after_eol ();
+      return Tree::error ();
+    }
+
+  expect_token (Toki::LA);
+
+  // IF
+  then_stmt = parse_block_statement ();
+
+  // ELSE
+  const_TokenPtr t = lexer.peek_token ();
+  if (t->get_id () == Toki::ANTE)
+    {
+      skip_token (Toki::ANTE);
+      else_stmt = parse_block_statement ();
+    }
+
+  return build_if_statement (expr, then_stmt, else_stmt);
+}
+
+Tree
+Parser::build_label_decl (const char *name, location_t loc)
+{
+  tree t = build_decl (loc, LABEL_DECL, get_identifier (name), void_type_node);
+
+  gcc_assert (main_fndecl != NULL_TREE);
+  DECL_CONTEXT (t) = main_fndecl;
+
+  return t;
+}
+
+Tree
+Parser::build_if_statement (Tree bool_expr, Tree then_part, Tree else_part)
+{
+  if (bool_expr.is_error ())
+    return Tree::error ();
+
+  Tree then_label_decl = build_label_decl ("then", then_part.get_locus ());
+
+  Tree else_label_decl;
+  if (!else_part.is_null ())
+    else_label_decl = build_label_decl ("else", else_part.get_locus ());
+
+  Tree endif_label_decl = build_label_decl ("end_if", then_part.get_locus ());
+
+  Tree goto_then = build_tree (GOTO_EXPR, bool_expr.get_locus (),
+			       void_type_node, then_label_decl);
+  Tree goto_endif = build_tree (GOTO_EXPR, bool_expr.get_locus (),
+				void_type_node, endif_label_decl);
+
+  Tree goto_else_or_endif;
+  if (!else_part.is_null ())
+    goto_else_or_endif = build_tree (GOTO_EXPR, bool_expr.get_locus (),
+				     void_type_node, else_label_decl);
+  else
+    goto_else_or_endif = goto_endif;
+
+  TreeStmtList stmt_list;
+
+  Tree cond_expr
+    = build_tree (COND_EXPR, bool_expr.get_locus (), void_type_node, bool_expr,
+		  goto_then, goto_else_or_endif);
+  stmt_list.append (cond_expr);
+
+  Tree then_label_expr = build_tree (LABEL_EXPR, then_part.get_locus (),
+				     void_type_node, then_label_decl);
+  stmt_list.append (then_label_expr);
+
+  stmt_list.append (then_part);
+
+  if (!else_part.is_null ())
+    {
+      // Make sure after then part has been executed we go to the end if
+      stmt_list.append (goto_endif);
+
+      Tree else_label_expr = build_tree (LABEL_EXPR, else_part.get_locus (),
+					 void_type_node, else_label_decl);
+      stmt_list.append (else_label_expr);
+
+      stmt_list.append (else_part);
+    }
+
+  // FIXME - location
+  Tree endif_label_expr = build_tree (LABEL_EXPR, UNKNOWN_LOCATION,
+				      void_type_node, endif_label_decl);
+  stmt_list.append (endif_label_expr);
+
+  return stmt_list.get_tree ();
 }
 
 // This is a Pratt parser
@@ -822,6 +947,7 @@ Parser::null_denotation (const_TokenPtr tok)
 	const_TokenPtr next = lexer.peek_token ();
 	if (next->get_id () == Toki::ALA)
 	  {
+	    lexer.skip_token ();
 	    return Tree (build_int_cst_type (boolean_type_node, 0),
 			 next->get_locus ());
 	  }
