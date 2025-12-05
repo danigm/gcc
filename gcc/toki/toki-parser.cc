@@ -145,6 +145,7 @@ private:
   Scope scope;
 
   tree main_fndecl;
+  Tree _current_fn_decl;
 
   Tree puts_fn;
   Tree printf_fn;
@@ -156,8 +157,6 @@ private:
   std::vector<BlockChain> stack_block_chain;
 
   std::vector<Tree> stack_loop_labels;
-
-  Tree _current_fn_decl;
 };
 
 void
@@ -870,7 +869,7 @@ Parser::parse_variable_statement ()
       Tree decl = build_decl (identifier->get_locus (), VAR_DECL,
 			      get_identifier (sym->get_name ().c_str ()),
 			      type_tree.get_tree ());
-      DECL_CONTEXT (decl.get_tree()) = main_fndecl;
+      DECL_CONTEXT (decl.get_tree ()) = _current_fn_decl.get_tree ();
       gcc_assert (!stack_var_decl_chain.empty ());
       stack_var_decl_chain.back ().append (decl);
 
@@ -1920,6 +1919,7 @@ Parser::parse_type ()
 Tree
 Parser::parse_main ()
 {
+  _current_fn_decl = main_fndecl;
   Tree main = parse_block_statement ();
   return main;
 }
