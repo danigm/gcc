@@ -133,6 +133,7 @@ public:
   Tree parse_loop_statement ();
   Tree parse_break_statement ();
   Tree parse_function_call ();
+  Tree parse_return_statement ();
 
   Tree parse_expression ();
   Tree parse_expression_naming_variable ();
@@ -155,6 +156,8 @@ private:
   std::vector<BlockChain> stack_block_chain;
 
   std::vector<Tree> stack_loop_labels;
+
+  Tree _current_fn_decl;
 };
 
 void
@@ -466,24 +469,27 @@ Parser::parse_function_declaration ()
   tree fndecl_type_param[] = {};
   tree fndecl_type = build_function_type_array (integer_type_node, 0, nullptr);
   tree fn_decl = build_fn_decl (identifier->get_str ().c_str (), fndecl_type);
+  _current_fn_decl = fn_decl;
 
   enter_scope ();
 
   Tree fn_body = parse_block_statement ();
-
-  // Append "return 0;"
-  tree resdecl
-    = build_decl (UNKNOWN_LOCATION, RESULT_DECL, NULL_TREE, integer_type_node);
-  DECL_CONTEXT (resdecl) = fn_decl;
-  DECL_RESULT (fn_decl) = resdecl;
-  tree set_result
-    = build2 (INIT_EXPR, void_type_node, DECL_RESULT (fn_decl),
-	      build_int_cst_type (integer_type_node, 0));
-  tree return_stmt = build1 (RETURN_EXPR, void_type_node, set_result);
-
   get_current_stmt_list ().append (fn_body);
-  get_current_stmt_list ().append (return_stmt);
-  //
+
+  if (!DECL_RESULT (fn_decl))
+    {
+      // Append "return 0;"
+      tree resdecl
+	= build_decl (UNKNOWN_LOCATION, RESULT_DECL, NULL_TREE, integer_type_node);
+      DECL_CONTEXT (resdecl) = fn_decl;
+      DECL_RESULT (fn_decl) = resdecl;
+      tree set_result
+	= build2 (INIT_EXPR, void_type_node, DECL_RESULT (fn_decl),
+		  build_int_cst_type (integer_type_node, 0));
+      tree return_stmt = build1 (RETURN_EXPR, void_type_node, set_result);
+
+      get_current_stmt_list ().append (return_stmt);
+    }
 
   TreeSymbolMapping fn_tree_scope = leave_scope ();
   Tree fn_block = fn_tree_scope.block;
@@ -499,7 +505,7 @@ Parser::parse_function_declaration ()
   gimplify_function_tree (fn_decl);
 
   // Add to the scope
-  Tree fn = build1 (ADDR_EXPR, build_pointer_type (fndecl_type), fn_decl);
+  Tree fn = build1 (ADDR_EXPR, build_pointer_type (TREE_TYPE (fn_decl)), fn_decl);
   scope.get_current_fn ().insert (std::make_pair (identifier->get_str (), fn));
 
   // Insert it into the graph
@@ -531,11 +537,48 @@ Parser::parse_command_statement ()
   if (t->get_id () == Toki::PINI)
     return parse_break_statement ();
 
+  if (t->get_id () == Toki::PANA)
+    return parse_return_statement ();
+
   if (t->get_id () == Toki::IDENTIFIER)
     return parse_function_call ();
 
   skip_after_eol ();
   return Tree::error ();
+}
+
+Tree
+Parser::parse_return_statement ()
+{
+  // o pana e EXPR
+  if (!skip_token (Toki::PANA) || !skip_token (Toki::E))
+    {
+      skip_after_eol ();
+      return Tree::error ();
+    }
+
+  const_TokenPtr t = lexer.peek_token ();
+  Tree expr = parse_expression ();
+  if (expr.is_error ())
+    return Tree::error ();
+
+  tree fn_decl = _current_fn_decl.get_tree ();
+
+  // Modify fn_decl return type
+  tree fndecl_type_param[] = {};
+  tree new_type = build_function_type_array (expr.get_type ().get_tree(), 0, nullptr);
+  TREE_TYPE (fn_decl) = new_type;
+
+  // Add return statement
+  tree resdecl
+    = build_decl (t->get_locus (), RESULT_DECL, NULL_TREE, expr.get_type ().get_tree ());
+  DECL_CONTEXT (resdecl) = fn_decl;
+  DECL_RESULT (fn_decl) = resdecl;
+  tree set_result
+    = build2 (INIT_EXPR, void_type_node, DECL_RESULT (fn_decl), expr.get_tree ());
+  tree return_stmt = build1 (RETURN_EXPR, void_type_node, set_result);
+
+  return return_stmt;
 }
 
 /**
@@ -555,25 +598,13 @@ Parser::parse_function_call ()
     return Tree::error ();
   }
 
+  // ADDR_EXPR -> fn_decl -> fn_decl_type
+  tree return_type = TREE_TYPE (TREE_TYPE (TREE_TYPE (fn.get_tree ())));
   tree stmt
-    = build_call_array_loc (identifier->get_locus (), integer_type_node,
+    = build_call_array_loc (identifier->get_locus (), return_type,
 			    fn.get_tree (), 0, nullptr);
 
   return stmt;
-
-  /*
-      const char *format_integer = "TEST\n";
-      tree args[]
-	= {build_string_literal (strlen (format_integer) + 1, format_integer)};
-
-      Tree printf_fn = get_printf_addr ();
-
-      tree stmt
-	= build_call_array_loc (identifier->get_locus (), integer_type_node,
-				printf_fn.get_tree (), 1, args);
-
-      return stmt;
-    */
 }
 
 Tree
@@ -808,9 +839,23 @@ Parser::parse_variable_statement ()
   const_TokenPtr assig_tok = expect_token (Toki::LI);
 
   const_TokenPtr first_of_expr = lexer.peek_token ();
-  Tree expr = parse_expression ();
-  if (expr.is_error ())
-    return Tree::error ();
+
+  Tree expr;
+  // Function call return!
+  if (first_of_expr->get_id () == Toki::O)
+    {
+      lexer.skip_token ();
+      expr = parse_function_call ();
+      if (expr.is_error ())
+	return Tree::error ();
+    }
+  // Expression
+  else
+    {
+      expr = parse_expression ();
+      if (expr.is_error ())
+	return Tree::error ();
+    }
 
   SymbolPtr sym = scope.lookup (identifier->get_str ());
   // Add to scope if it's not there
