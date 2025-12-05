@@ -53,12 +53,15 @@ namespace Toki
   TOKI_TOKEN_KEYWORD (E, "e")                                                  \
   TOKI_TOKEN_KEYWORD (EN, "en")                                                \
   TOKI_TOKEN_KEYWORD (IJO, "ijo")                                              \
+  TOKI_TOKEN_KEYWORD (JAKI, "jaki")                                            \
   TOKI_TOKEN_KEYWORD (JO, "jo")                                                \
   TOKI_TOKEN_KEYWORD (KAMA, "kama")                                            \
   TOKI_TOKEN_KEYWORD (LA, "la")                                                \
   TOKI_TOKEN_KEYWORD (LI, "li")                                                \
   TOKI_TOKEN_KEYWORD (LON, "lon")                                              \
   TOKI_TOKEN_KEYWORD (LUKIN, "lukin")                                          \
+  TOKI_TOKEN_KEYWORD (MUTE, "mute")                                            \
+  TOKI_TOKEN_KEYWORD (NANPA, "nanpa")                                          \
   TOKI_TOKEN_KEYWORD (NASIN, "nasin")                                          \
   TOKI_TOKEN_KEYWORD (NI, "ni")                                                \
   TOKI_TOKEN_KEYWORD (NIMI, "nimi")                                            \

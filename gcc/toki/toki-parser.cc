@@ -34,6 +34,7 @@ struct Parser
 {
 private:
   void skip_after_eol ();
+  void skip_after_block ();
 
   bool skip_token (TokenId);
   void skip_eol ();
@@ -440,9 +441,8 @@ Parser::parse_function_declaration ()
 {
   // function declaration:
   // nasin li nimi IDENT
-  // TODO:
-  // parameters: li kama jo (e TYPE)+
-  // return: li pana e (TYPE)+
+  //
+  // optional parameters: li kama jo (e TYPE)+
 
   if (!skip_token (Toki::NASIN))
     {
@@ -462,8 +462,29 @@ Parser::parse_function_declaration ()
     }
 
   const_TokenPtr identifier = expect_token (Toki::IDENTIFIER);
+  skip_eol ();
 
-  // TODO: support parameters and return definition
+  // Function arguments
+  t = lexer.peek_token ();
+  if (t->get_id () == Toki::LI)
+    {
+      lexer.skip_token ();
+      if (!skip_token (Toki::KAMA) || !skip_token (Toki::JO))
+	{
+	  skip_after_eol ();
+	  return Tree::error ();
+	}
+      t = lexer.peek_token ();
+      while (t->get_id () == Toki::E)
+	{
+	  lexer.skip_token ();
+	  Tree type = parse_type ();
+	  const_TokenPtr identifier = expect_token (Toki::IDENTIFIER);
+	  t = lexer.peek_token ();
+	}
+      // TODO: Add arguments to the fndecl_type
+    }
+  // End of parameters
 
   tree fndecl_type_param[] = {};
   tree fndecl_type = build_function_type_array (integer_type_node, 0, nullptr);
@@ -864,7 +885,6 @@ Parser::parse_variable_statement ()
       scope.get_current_mapping ().insert (sym);
 
       // Add variable declaration
-      // TODO
       Tree type_tree = expr.get_type ();
       Tree decl = build_decl (identifier->get_locus (), VAR_DECL,
 			      get_identifier (sym->get_name ().c_str ()),
@@ -1823,6 +1843,7 @@ Parser::parse_type ()
   // type -> "int"
   //      | "float"
   //      | "bool"
+  //      | "string"
   //      | IDENTIFIER
   //      | type '[' expr ']'
   //      | type '(' expr : expr ')'
@@ -1833,6 +1854,26 @@ Parser::parse_type ()
 
   switch (t->get_id ())
     {
+    case Toki::NANPA:
+      {
+	const_TokenPtr next = lexer.peek_token ();
+	type = integer_type_node;
+	if (next->get_id () == Toki::JAKI)
+	  {
+	    lexer.skip_token ();
+	    type = float_type_node;
+	  }
+	lexer.skip_token ();
+      }
+      break;
+    case Toki::LON:
+      lexer.skip_token ();
+      type = boolean_type_node;
+      break;
+    case Toki::NIMI:
+      lexer.skip_token ();
+      type = build_pointer_type (char_type_node);
+      break;
     case Toki::IDENTIFIER:
       {
 	SymbolPtr s = query_type (t->get_str (), t->get_locus ());
@@ -1843,6 +1884,9 @@ Parser::parse_type ()
 	  type = TREE_TYPE (s->get_tree_decl ().get_tree ());
       }
       break;
+    // case Toki::RECORD:
+    //   type = parse_record ();
+    //   break;
     default:
       unexpected_token (t);
       return Tree::error ();
