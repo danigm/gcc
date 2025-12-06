@@ -2,8 +2,11 @@
  * Toki parser
  *
  * TODO:
- * 1. Treat main function like a regular function
- * 2. Parse function return type, needed for recursion, to make it correctly
+ * 1. Parse function return type, needed for recursion, to make it correctly
+ * 2. Implement data input builtins: scanf
+ * 3. Implement file operations, read/write
+ * 4. Implement function definition, like in .h files?
+ * 5. Implement namespaces and import?
  */
 
 #include <iostream>
@@ -131,7 +134,6 @@ public:
   Tree parse_type ();
   Tree parse_statement ();
 
-  Tree parse_main ();
   Tree parse_function_declaration ();
   Tree parse_command_statement ();
   Tree parse_variable_statement ();
@@ -153,7 +155,6 @@ private:
   Lexer &lexer;
   Scope scope;
 
-  tree main_fndecl;
   Tree _current_fn_decl;
 
   Tree puts_fn;
@@ -239,52 +240,13 @@ Parser::unexpected_token (const_TokenPtr t)
 void
 Parser::parse_program ()
 {
-  // Built type of main "int (int, char**)"
-  tree main_fndecl_type_param[] = {
-    integer_type_node,					     /* int */
-    build_pointer_type (build_pointer_type (char_type_node)) /* char** */
-  };
-  tree main_fndecl_type
-    = build_function_type_array (integer_type_node, 2, main_fndecl_type_param);
-  // Create function declaration "int main(int, char**)"
-  main_fndecl = build_fn_decl ("main", main_fndecl_type);
-
-  // Enter top level scope
+  // global scope
   enter_scope ();
+
   // program -> statement*
   parse_statement_seq (&Parser::done_end_of_file);
 
-  // Append "return 0;"
-  tree resdecl
-    = build_decl (UNKNOWN_LOCATION, RESULT_DECL, NULL_TREE, integer_type_node);
-  DECL_CONTEXT (resdecl) = main_fndecl;
-  DECL_RESULT (main_fndecl) = resdecl;
-  tree set_result
-    = build2 (INIT_EXPR, void_type_node, DECL_RESULT (main_fndecl),
-	      build_int_cst_type (integer_type_node, 0));
-  tree return_stmt = build1 (RETURN_EXPR, void_type_node, set_result);
-
-  get_current_stmt_list ().append (return_stmt);
-
-  // Leave top level scope, get its binding expression and its main block
-  TreeSymbolMapping main_tree_scope = leave_scope ();
-  Tree main_block = main_tree_scope.block;
-
-  // Finish main function
-  BLOCK_SUPERCONTEXT (main_block.get_tree ()) = main_fndecl;
-  DECL_INITIAL (main_fndecl) = main_block.get_tree ();
-  DECL_SAVED_TREE (main_fndecl) = main_tree_scope.bind_expr.get_tree ();
-
-  DECL_EXTERNAL (main_fndecl) = 0;
-  DECL_PRESERVE_P (main_fndecl) = 1;
-
-  // Convert from GENERIC to GIMPLE
-  gimplify_function_tree (main_fndecl);
-
-  // Insert it into the graph
-  cgraph_node::finalize_function (main_fndecl, true);
-
-  main_fndecl = NULL_TREE;
+  leave_scope ();
 }
 
 bool
@@ -461,19 +423,17 @@ Parser::parse_function_declaration ()
   expect_token (Toki::LI);
   expect_token (Toki::NIMI);
 
-  // Main function
-  const_TokenPtr t = lexer.peek_token ();
-  if (t->get_id () == Toki::OPEN)
-    {
-      skip_token (Toki::OPEN);
-      return parse_main ();
-    }
-
   const_TokenPtr identifier = expect_token (Toki::IDENTIFIER);
+  // Main function
+  if (!strcmp (identifier->get_str ().c_str (), "open"))
+    {
+      std::string main = "main";
+      identifier = Token::make_identifier (identifier->get_locus (), main);
+    }
   skip_eol ();
 
   // Function arguments
-  t = lexer.peek_token ();
+  const_TokenPtr t = lexer.peek_token ();
 
   auto args = std::vector<tree> ();
   auto args_decls = std::vector<tree> ();
@@ -2039,14 +1999,6 @@ Parser::parse_type ()
     }
 
   return type;
-}
-
-Tree
-Parser::parse_main ()
-{
-  _current_fn_decl = main_fndecl;
-  Tree main = parse_block_statement ();
-  return main;
 }
 
 }
