@@ -75,6 +75,7 @@ private:
 
   TreeSymbolMapping leave_scope ();
 
+  SymbolPtr create_symbol (std::string id, Tree type_tree, location_t loc);
   SymbolPtr query_type (const std::string &name, location_t loc);
   SymbolPtr query_variable (const std::string &name, location_t loc);
   SymbolPtr query_integer_variable (const std::string &name, location_t loc);
@@ -466,6 +467,9 @@ Parser::parse_function_declaration ()
 
   // Function arguments
   t = lexer.peek_token ();
+
+  auto args = std::vector<tree> ();
+  auto args_decls = std::vector<tree> ();
   if (t->get_id () == Toki::LI)
     {
       lexer.skip_token ();
@@ -481,15 +485,32 @@ Parser::parse_function_declaration ()
 	  Tree type = parse_type ();
 	  const_TokenPtr identifier = expect_token (Toki::IDENTIFIER);
 	  t = lexer.peek_token ();
+	  args.push_back (type.get_tree ());
+
+	  tree decl =
+	    build_decl (identifier->get_locus (), PARM_DECL,
+			get_identifier (identifier->get_str ().c_str ()),
+			type.get_tree ());
+	  DECL_ARG_TYPE (decl) = type.get_tree ();
+	  args_decls.push_back (decl);
 	}
-      // TODO: Add arguments to the fndecl_type
     }
   // End of parameters
 
-  tree fndecl_type_param[] = {};
-  tree fndecl_type = build_function_type_array (integer_type_node, 0, nullptr);
+  tree fndecl_type =
+    build_function_type_array (integer_type_node, args.size(),
+			       args.size() ? args.data (): nullptr);
   tree fn_decl = build_fn_decl (identifier->get_str ().c_str (), fndecl_type);
   _current_fn_decl = fn_decl;
+
+  // Set arguments in function
+  tree params = NULL_TREE;
+  for (tree decl : args_decls)
+    {
+      DECL_CONTEXT (decl) = fn_decl;
+      params = chainon (params, decl);
+    }
+   DECL_ARGUMENTS (fn_decl) = params;
 
   enter_scope ();
 
@@ -585,8 +606,16 @@ Parser::parse_return_statement ()
   tree fn_decl = _current_fn_decl.get_tree ();
 
   // Modify fn_decl return type
-  tree fndecl_type_param[] = {};
-  tree new_type = build_function_type_array (expr.get_type ().get_tree(), 0, nullptr);
+  auto args = std::vector<tree> ();
+  tree chain = DECL_ARGUMENTS (_current_fn_decl.get_tree ());
+  for (tree t = chain; t; t = TREE_CHAIN (t))
+    {
+      args.push_back (DECL_ARG_TYPE (t));
+    }
+  tree new_type =
+    build_function_type_array (expr.get_type ().get_tree(),
+			       args.size (),
+			       args.size() ? args.data (): nullptr);
   TREE_TYPE (fn_decl) = new_type;
 
   // Add return statement
@@ -607,9 +636,21 @@ Parser::parse_return_statement ()
 Tree
 Parser::parse_function_call ()
 {
-  // o IDENT
+  // o IDENT e EXPR e EXPR ...
   const_TokenPtr identifier = expect_token (Toki::IDENTIFIER);
-  // TODO: support parameters
+
+  // Arguments
+  auto args = std::vector<tree> ();
+  const_TokenPtr t = lexer.peek_token ();
+  while (t->get_id () == Toki::E)
+    {
+      lexer.skip_token ();
+      Tree expr = parse_expression ();
+      if (expr.is_error ())
+	return Tree::error ();
+      args.push_back (expr.get_tree ());
+      t = lexer.peek_token ();
+    }
 
   Tree fn = scope.lookup_fn (identifier->get_str ());
   if (fn.is_null ())
@@ -622,7 +663,8 @@ Parser::parse_function_call ()
   tree return_type = TREE_TYPE (TREE_TYPE (TREE_TYPE (fn.get_tree ())));
   tree stmt
     = build_call_array_loc (identifier->get_locus (), return_type,
-			    fn.get_tree (), 0, nullptr);
+			    fn.get_tree (), args.size (),
+			    args.size() ? args.data (): nullptr);
 
   return stmt;
 }
@@ -838,6 +880,21 @@ Parser::parse_block_statement ()
   return block_tree_scope.bind_expr;
 }
 
+SymbolPtr
+Parser::create_symbol (std::string id, Tree type_tree, location_t loc)
+{
+  SymbolPtr sym (new Symbol (Toki::VARIABLE, id));
+
+  // Add variable declaration
+  Tree decl = build_decl (loc, VAR_DECL,
+			  get_identifier (sym->get_name ().c_str ()),
+			  type_tree.get_tree ());
+  DECL_CONTEXT (decl.get_tree ()) = _current_fn_decl.get_tree ();
+
+  sym->set_tree_decl (decl);
+  return sym;
+}
+
 Tree
 Parser::parse_variable_statement ()
 {
@@ -881,19 +938,13 @@ Parser::parse_variable_statement ()
   // Add to scope if it's not there
   if (!sym)
     {
-      SymbolPtr sym (new Symbol (Toki::VARIABLE, identifier->get_str ()));
-      scope.get_current_mapping ().insert (sym);
-
       // Add variable declaration
-      Tree type_tree = expr.get_type ();
-      Tree decl = build_decl (identifier->get_locus (), VAR_DECL,
-			      get_identifier (sym->get_name ().c_str ()),
-			      type_tree.get_tree ());
-      DECL_CONTEXT (decl.get_tree ()) = _current_fn_decl.get_tree ();
+      SymbolPtr sym = create_symbol (identifier->get_str (), expr.get_type (), identifier->get_locus ());
+      Tree decl = sym->get_tree_decl ();
+
+      scope.get_current_mapping ().insert (sym);
       gcc_assert (!stack_var_decl_chain.empty ());
       stack_var_decl_chain.back ().append (decl);
-
-      sym->set_tree_decl (decl);
 
       Tree stmt
 	= build_tree (DECL_EXPR, identifier->get_locus (), void_type_node, decl);
@@ -1166,7 +1217,9 @@ Parser::null_denotation (const_TokenPtr tok)
       {
 	SymbolPtr s = query_variable (tok->get_str (), tok->get_locus ());
 	if (s == NULL)
-	  return Tree::error ();
+	  {
+	    return Tree::error ();
+	  }
 	return Tree (s->get_tree_decl (), tok->get_locus ());
       }
     case Toki::INTEGER_LITERAL:
@@ -1702,6 +1755,19 @@ Parser::query_variable (const std::string &name, location_t loc)
   SymbolPtr sym = scope.lookup (name);
   if (sym == NULL)
     {
+      // Look for argument declaration in function
+      tree chain = DECL_ARGUMENTS (_current_fn_decl.get_tree ());
+      for (tree t = chain; t; t = TREE_CHAIN (t))
+	{
+	  if (id_equal (DECL_NAME (t), name.c_str ()))
+	    {
+	      SymbolPtr sym (new Symbol (Toki::ARGUMENT, name));
+	      Tree arg_decl = t;
+	      sym->set_tree_decl (arg_decl);
+	      return sym;
+	    }
+	}
+
       error_at (loc, "variable '%s' not declared in the current scope",
 		name.c_str ());
     }

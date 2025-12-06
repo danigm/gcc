@@ -18,7 +18,8 @@ enum /* class */ SymbolKind
 {
   INVALID,
   VARIABLE,
-  TYPENAME
+  TYPENAME,
+  ARGUMENT
 };
 
 struct Symbol
@@ -44,8 +45,9 @@ public:
   void
   set_tree_decl (Tree decl_)
   {
-    gcc_assert ((kind == VARIABLE && decl_.get_tree_code() == VAR_DECL)
-                    || (kind == TYPENAME && decl_.get_tree_code() == TYPE_DECL));
+    gcc_assert ((kind == VARIABLE && decl_.get_tree_code() == VAR_DECL)  ||
+		(kind == TYPENAME && decl_.get_tree_code() == TYPE_DECL) ||
+		(kind == ARGUMENT && decl_.get_tree_code() == PARM_DECL));
     decl = decl_;
   }
 
