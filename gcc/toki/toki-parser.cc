@@ -1,4 +1,10 @@
-/* Toki parser */
+/*
+ * Toki parser
+ *
+ * TODO:
+ * 1. Treat main function like a regular function
+ * 2. Parse function return type, needed for recursion, to make it correctly
+ */
 
 #include <iostream>
 #include <memory>
@@ -58,6 +64,7 @@ private:
   Tree build_label_decl (const char *name, location_t loc);
   Tree build_if_statement (Tree bool_expr, Tree then_part, Tree else_part);
   Tree build_loop_statement ();
+  Tree build_function_call (tree fn_decl, const_TokenPtr identifier, std::vector<tree> args);
 
   std::string get_loop_tag (const char *suffix);
 
@@ -501,6 +508,9 @@ Parser::parse_function_declaration ()
     build_function_type_array (integer_type_node, args.size(),
 			       args.size() ? args.data (): nullptr);
   tree fn_decl = build_fn_decl (identifier->get_str ().c_str (), fndecl_type);
+
+  // Add to the scope
+  scope.get_current_fn ().insert (std::make_pair (identifier->get_str (), fn_decl));
   _current_fn_decl = fn_decl;
 
   // Set arguments in function
@@ -544,10 +554,6 @@ Parser::parse_function_declaration ()
 
   // Convert from GENERIC to GIMPLE
   gimplify_function_tree (fn_decl);
-
-  // Add to the scope
-  Tree fn = build1 (ADDR_EXPR, build_pointer_type (TREE_TYPE (fn_decl)), fn_decl);
-  scope.get_current_fn ().insert (std::make_pair (identifier->get_str (), fn));
 
   // Insert it into the graph
   cgraph_node::finalize_function (fn_decl, true);
@@ -659,13 +665,19 @@ Parser::parse_function_call ()
     return Tree::error ();
   }
 
-  // ADDR_EXPR -> fn_decl -> fn_decl_type
-  tree return_type = TREE_TYPE (TREE_TYPE (TREE_TYPE (fn.get_tree ())));
+  return build_function_call (fn.get_tree (), identifier, args);
+}
+
+Tree
+Parser::build_function_call (tree fn_decl, const_TokenPtr identifier, std::vector<tree> args)
+{
+  // fn_decl -> fn_decl_type
+  tree return_type = TREE_TYPE (TREE_TYPE (fn_decl));
+  tree fn = build1 (ADDR_EXPR, build_pointer_type (TREE_TYPE (fn_decl)), fn_decl);
   tree stmt
     = build_call_array_loc (identifier->get_locus (), return_type,
-			    fn.get_tree (), args.size (),
+			    fn, args.size (),
 			    args.size() ? args.data (): nullptr);
-
   return stmt;
 }
 
@@ -924,7 +936,10 @@ Parser::parse_variable_statement ()
       lexer.skip_token ();
       expr = parse_function_call ();
       if (expr.is_error ())
-	return Tree::error ();
+	{
+	  skip_after_eol ();
+	  return Tree::error ();
+	}
     }
   // Expression
   else
@@ -1019,8 +1034,8 @@ Parser::build_label_decl (const char *name, location_t loc)
 {
   tree t = build_decl (loc, LABEL_DECL, get_identifier (name), void_type_node);
 
-  gcc_assert (main_fndecl != NULL_TREE);
-  DECL_CONTEXT (t) = main_fndecl;
+  gcc_assert (_current_fn_decl != NULL_TREE);
+  DECL_CONTEXT (t) = _current_fn_decl.get_tree ();
 
   return t;
 }
