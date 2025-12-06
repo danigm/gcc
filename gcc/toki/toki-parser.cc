@@ -7,6 +7,7 @@
  * 3. Implement file operations, read/write
  * 4. Implement function definition, like in .h files?
  * 5. Implement namespaces and import?
+ * 6. Support tagging in loop/break
  */
 
 #include <iostream>
